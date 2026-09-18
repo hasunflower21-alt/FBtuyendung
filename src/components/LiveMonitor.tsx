@@ -12,6 +12,8 @@ import {
   Copy,
   Trash2,
   Moon,
+  ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { EngineState, LogEntry, FacebookGroup } from "../types";
 
@@ -24,6 +26,8 @@ interface LiveMonitorProps {
   onClearLogs: () => void;
   activeGroup?: FacebookGroup;
   onToggleBatterySaver?: () => void;
+  onGoToGroups?: () => void;
+  groups?: FacebookGroup[];
 }
 
 export const LiveMonitor: React.FC<LiveMonitorProps> = ({
@@ -35,6 +39,8 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
   onClearLogs,
   activeGroup,
   onToggleBatterySaver,
+  onGoToGroups,
+  groups = [],
 }) => {
   const [logFilter, setLogFilter] = useState<"all" | "success" | "delay" | "warning">("all");
   const [copiedLogs, setCopiedLogs] = useState(false);
@@ -193,6 +199,35 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
             ></div>
           </div>
         </div>
+
+        {/* Completion & Safe Groups Highlight Banner */}
+        {engineState.status === "completed" && (
+          <div className="mt-3 p-3 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-xl text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
+                <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white">
+                  🎉 Hoàn Thành Ca Đăng! Đã Tự Động Lưu Nhóm Thành Công
+                </h4>
+                <p className="text-[11px] text-emerald-100 mt-0.5">
+                  Các nhóm đăng bài không gặp lỗi/chặn link đã được đánh dấu an toàn để lọc cho ca tiếp theo.
+                </p>
+              </div>
+            </div>
+
+            {onGoToGroups && (
+              <button
+                onClick={onGoToGroups}
+                className="w-full sm:w-auto px-3 py-1.5 rounded-lg bg-white hover:bg-emerald-50 text-emerald-800 text-xs font-bold shadow-xs transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Xem & Lọc Nhóm Thành Công &rarr;</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Grid: Current Activity Snapshot & Real-time Countdown */}

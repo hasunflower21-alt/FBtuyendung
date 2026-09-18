@@ -6,9 +6,13 @@ export interface FacebookGroup {
   memberCount?: string;
   isActive: boolean;
   shift: "all" | "morning" | "evening";
-  lastStatus?: "success" | "pending_approval" | "error" | "ready";
+  lastStatus?: "success" | "pending_approval" | "blocked" | "error" | "ready";
   lastPostedAt?: string;
   postNote?: string;
+  successCount?: number; // Số lần đăng bài thành công không bị chặn
+  blockedCount?: number; // Số lần bị kiểm duyệt hoặc bị chặn
+  isVerifiedSafe?: boolean; // Nhóm uy tín đã kiểm chứng đăng mượt mà
+  autoApprove?: boolean; // Nhóm duyệt bài tự động không cần duyệt tay
 }
 
 export interface ScheduleConfig {

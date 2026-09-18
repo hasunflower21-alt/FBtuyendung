@@ -237,16 +237,24 @@ export default function App() {
       setTimeout(() => {
         if (isPausedRef.current) return;
 
-        addLog("success", `✅ Đã gửi bài đăng thành công vào nhóm: ${group.name}`, group.name);
+        addLog(
+          "success",
+          `✅ Đã gửi bài thành công vào nhóm: ${group.name} (An toàn, không checkpoint/chặn link -> Đã lưu vào nhóm uy tín)`,
+          group.name
+        );
 
-        // Update group status
+        // Update group status with tracking history
+        const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         setGroups((prev) =>
           prev.map((g) =>
             g.id === group.id
               ? {
                   ...g,
                   lastStatus: "success",
-                  lastPostedAt: new Date().toLocaleTimeString(),
+                  isVerifiedSafe: true,
+                  successCount: (g.successCount || 0) + 1,
+                  lastPostedAt: `${nowTime} Hôm nay`,
+                  postNote: "Đăng mượt, duyệt tự động, không bị chặn",
                 }
               : g
           )
@@ -417,6 +425,8 @@ export default function App() {
             onClearLogs={handleClearLogs}
             activeGroup={currentActiveGroup}
             onToggleBatterySaver={() => setIsBatterySaverOpen(true)}
+            onGoToGroups={() => setActiveTab("groups")}
+            groups={groups}
           />
         )}
       </main>
