@@ -18,6 +18,27 @@ import {
   ShieldCheck,
   Maximize2,
   Zap,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Type,
+  Smile,
+  Minus,
+  ListOrdered,
+  Heading1,
+  Heading2,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Star,
+  GripVertical,
+  RotateCcw,
+  Sparkle,
+  Copy,
+  CheckCheck,
+  ArrowLeftRight,
 } from "lucide-react";
 import { resolveSpintax, calculateCombinations } from "../utils/spintax";
 import {
@@ -25,6 +46,14 @@ import {
   isImageVerticalOrTooTall,
   ImageOptimizationOptions,
 } from "../utils/imageOptimizer";
+import {
+  convertToUnicodeFont,
+  applyUnderline,
+  applyStrikethrough,
+  stripUnicodeStyles,
+  SYMBOL_CATEGORIES,
+  POST_DIVIDERS,
+} from "../utils/textFormatter";
 
 interface PostComposerProps {
   rawContent: string;
@@ -53,7 +82,23 @@ export const PostComposer: React.FC<PostComposerProps> = ({
   const [showVariationsModal, setShowVariationsModal] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
 
-  // Drag & drop state
+  // Textarea references for text formatting
+  const spintaxTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const rawTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Text formatting popover states
+  const [showFontMenu, setShowFontMenu] = useState(false);
+  const [showSymbolsPopover, setShowSymbolsPopover] = useState(false);
+  const [showDividersMenu, setShowDividersMenu] = useState(false);
+  const [activeSymbolCategory, setActiveSymbolCategory] = useState(0);
+  const [formatToast, setFormatToast] = useState<string | null>(null);
+
+  // Image Reordering / Drag & drop state
+  const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
+  const [dragOverImageIndex, setDragOverImageIndex] = useState<number | null>(null);
+  const [showReorderModal, setShowReorderModal] = useState(false);
+
+  // Dropzone state for upload
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragCounterRef = useRef(0);
   const dropzoneRef = useRef<HTMLDivElement>(null);
@@ -307,6 +352,169 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Reordering handlers for images / album pages
+  const handleMoveImage = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || toIndex < 0 || toIndex >= images.length) return;
+    setImages((prev) => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  };
+
+  const handleSetAsCover = (index: number) => {
+    if (index === 0 || index >= images.length) return;
+    handleMoveImage(index, 0);
+    setOptimizationMessage(`⭐ Đã đặt ảnh #${index + 1} làm Trang 1 (Ảnh bìa chính của bài viết)!`);
+    setTimeout(() => setOptimizationMessage(null), 4000);
+  };
+
+  const handleReverseImages = () => {
+    if (images.length <= 1) return;
+    setImages((prev) => [...prev].reverse());
+    setOptimizationMessage("🔄 Đã đảo ngược thứ tự toàn bộ ảnh / trang trong album!");
+    setTimeout(() => setOptimizationMessage(null), 4000);
+  };
+
+  // Formatting handlers for text styling, Unicode fonts, and symbols
+  const showFormatFeedback = (msg: string) => {
+    setFormatToast(msg);
+    setTimeout(() => setFormatToast(null), 2500);
+  };
+
+  const getActiveTextarea = () =>
+    activeSubTab === "spintax" ? spintaxTextareaRef.current : rawTextareaRef.current;
+
+  const getActiveText = () => (activeSubTab === "spintax" ? spintaxContent : rawContent);
+
+  const setActiveText = (val: string) => {
+    if (activeSubTab === "spintax") {
+      setSpintaxContent(val);
+    } else {
+      setRawContent(val);
+    }
+  };
+
+  const handleApplyFormatting = (
+    formatType:
+      | "bold"
+      | "serifBold"
+      | "italic"
+      | "boldItalic"
+      | "bubble"
+      | "boxed"
+      | "monospace"
+      | "blackboard"
+      | "underline"
+      | "strikethrough"
+      | "clear"
+      | "h1"
+      | "h2"
+  ) => {
+    const textarea = getActiveTextarea();
+    const currentText = getActiveText();
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const hasSelection = start !== end;
+    const selectedText = hasSelection ? currentText.substring(start, end) : "";
+
+    let formatted = "";
+    if (formatType === "bold") {
+      formatted = convertToUnicodeFont(selectedText || "TIÊU ĐỀ IN ĐẬM", "bold");
+    } else if (formatType === "serifBold") {
+      formatted = convertToUnicodeFont(selectedText || "Tiêu Đề Serif", "serifBold");
+    } else if (formatType === "italic") {
+      formatted = convertToUnicodeFont(selectedText || "Chữ in nghiêng", "italic");
+    } else if (formatType === "boldItalic") {
+      formatted = convertToUnicodeFont(selectedText || "Chữ đậm nghiêng", "boldItalic");
+    } else if (formatType === "bubble") {
+      formatted = convertToUnicodeFont(selectedText || "HOTLINE", "bubble");
+    } else if (formatType === "boxed") {
+      formatted = convertToUnicodeFont(selectedText || "KHUYEN MAI", "boxed");
+    } else if (formatType === "monospace") {
+      formatted = convertToUnicodeFont(selectedText || "thong tin ky thuat", "monospace");
+    } else if (formatType === "blackboard") {
+      formatted = convertToUnicodeFont(selectedText || "TIEU DE", "blackboard");
+    } else if (formatType === "underline") {
+      formatted = applyUnderline(selectedText || "Văn bản gạch chân");
+    } else if (formatType === "strikethrough") {
+      formatted = applyStrikethrough(selectedText || "Giá cũ đã giảm");
+    } else if (formatType === "clear") {
+      formatted = stripUnicodeStyles(selectedText || currentText);
+      if (!hasSelection) {
+        setActiveText(formatted);
+        showFormatFeedback("Đã xóa định dạng, đưa về chữ thường!");
+        return;
+      }
+    } else if (formatType === "h1") {
+      const base = selectedText ? selectedText.toUpperCase() : "TIÊU ĐỀ BÀI VIẾT NỔI BẬT";
+      const boldTitle = convertToUnicodeFont(base, "bold");
+      formatted = `🔥 ${boldTitle} 🔥\n═════════════════════════════\n`;
+    } else if (formatType === "h2") {
+      const base = selectedText || "Mục Nội Dung";
+      const boldSub = convertToUnicodeFont(base, "bold");
+      formatted = `\n📌 ${boldSub}:\n`;
+    }
+
+    const newContent = currentText.substring(0, start) + formatted + currentText.substring(end);
+    setActiveText(newContent);
+
+    setTimeout(() => {
+      textarea.focus();
+      if (hasSelection) {
+        textarea.setSelectionRange(start, start + formatted.length);
+      } else {
+        textarea.setSelectionRange(start + formatted.length, start + formatted.length);
+      }
+    }, 0);
+
+    setShowFontMenu(false);
+    showFormatFeedback("Đã áp dụng định dạng kiểu chữ!");
+  };
+
+  const handleInsertSymbol = (symbol: string) => {
+    const textarea = getActiveTextarea();
+    const currentText = getActiveText();
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newContent = currentText.substring(0, start) + symbol + currentText.substring(end);
+    setActiveText(newContent);
+
+    setTimeout(() => {
+      textarea.focus();
+      const nextPos = start + symbol.length;
+      textarea.setSelectionRange(nextPos, nextPos);
+    }, 0);
+
+    showFormatFeedback(`Đã chèn kí hiệu ${symbol}`);
+  };
+
+  const handleInsertDivider = (divider: string) => {
+    const textarea = getActiveTextarea();
+    const currentText = getActiveText();
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const formattedDivider = `\n${divider}\n`;
+    const newContent = currentText.substring(0, start) + formattedDivider + currentText.substring(end);
+    setActiveText(newContent);
+
+    setTimeout(() => {
+      textarea.focus();
+      const nextPos = start + formattedDivider.length;
+      textarea.setSelectionRange(nextPos, nextPos);
+    }, 0);
+
+    setShowDividersMenu(false);
+    showFormatFeedback("Đã chèn đường phân cách!");
+  };
+
   const currentPreviewSample = resolveSpintax(spintaxContent || rawContent);
 
   return (
@@ -435,40 +643,328 @@ export const PostComposer: React.FC<PostComposerProps> = ({
               </div>
             )}
 
-            {/* Textarea - Compact typography */}
-            <div className="mt-2.5">
+            {/* Formatting Toolbar - Rich Text, Unicode Fonts, Symbols & Sizes */}
+            <div className="mt-3 relative">
+              {formatToast && (
+                <div className="absolute -top-7 right-0 z-30 bg-slate-900 text-white text-[10px] font-semibold px-2.5 py-1 rounded-md shadow-lg flex items-center gap-1.5 animate-in fade-in duration-200">
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>{formatToast}</span>
+                </div>
+              )}
+
+              {/* Toolbar Bar */}
+              <div className="bg-slate-100/90 border border-slate-200 rounded-t-lg px-2 py-1.5 flex items-center justify-between gap-1 flex-wrap text-xs">
+                {/* Left: Basic Styles & Headings */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider hidden sm:inline mr-1">
+                    Định Dạng:
+                  </span>
+
+                  {/* B - Sans Bold */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("bold")}
+                    className="p-1 sm:px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-xs shadow-2xs hover:text-blue-600 transition-colors"
+                    title="In đậm (Bold Sans-Serif) - Bôi đen chữ rồi bấm"
+                  >
+                    <Bold className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Serif Bold */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("serifBold")}
+                    className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-serif font-bold text-xs shadow-2xs hover:text-blue-600 transition-colors"
+                    title="In đậm kiểu báo chí (Serif Bold)"
+                  >
+                    𝐁
+                  </button>
+
+                  {/* I - Italic */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("italic")}
+                    className="p-1 sm:px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs shadow-2xs hover:text-blue-600 transition-colors"
+                    title="In nghiêng (Italic)"
+                  >
+                    <Italic className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* U - Underline */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("underline")}
+                    className="p-1 sm:px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs shadow-2xs hover:text-blue-600 transition-colors"
+                    title="Gạch chân (Underline)"
+                  >
+                    <Underline className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* S - Strikethrough */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("strikethrough")}
+                    className="p-1 sm:px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs shadow-2xs hover:text-blue-600 transition-colors"
+                    title="Gạch ngang (Strikethrough - gạch giá cũ)"
+                  >
+                    <Strikethrough className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div className="h-4 w-px bg-slate-300 mx-0.5"></div>
+
+                  {/* Headings / Kích Thước */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("h1")}
+                    className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-[11px] shadow-2xs hover:text-red-600 transition-colors flex items-center gap-0.5"
+                    title="Tiêu Đề Lớn (In Đậm + Icon Lửa + Đường Kẻ)"
+                  >
+                    <Heading1 className="w-3 h-3 text-red-500" />
+                    <span>Tiêu Đề Lớn</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("h2")}
+                    className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-semibold text-[11px] shadow-2xs hover:text-blue-600 transition-colors flex items-center gap-0.5"
+                    title="Tiêu Đề Nhỡ (Phân Mục)"
+                  >
+                    <Heading2 className="w-3 h-3 text-blue-500" />
+                    <span>Mục</span>
+                  </button>
+
+                  <div className="h-4 w-px bg-slate-300 mx-0.5"></div>
+
+                  {/* Font Dropdown Menu */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFontMenu(!showFontMenu);
+                        setShowSymbolsPopover(false);
+                        setShowDividersMenu(false);
+                      }}
+                      className="px-2 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-semibold text-[11px] shadow-2xs hover:text-blue-600 transition-colors flex items-center gap-1"
+                    >
+                      <Type className="w-3 h-3 text-indigo-600" />
+                      <span>Font Chữ FB</span>
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+
+                    {showFontMenu && (
+                      <div className="absolute left-0 top-7 z-40 bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 w-56 space-y-1 text-xs">
+                        <div className="text-[10px] font-bold text-slate-400 px-2 py-0.5 uppercase tracking-wider">
+                          Đổi Font Đoạn Bôi Đen:
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("bold")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 flex items-center justify-between"
+                        >
+                          <span className="font-bold">𝗧𝗶𝗲̂𝘂 Đ𝗲̂̀ 𝗦𝗮𝗻𝘀 Đ𝗮̣̂𝗺</span>
+                          <span className="text-[10px] text-slate-400">Khuyên dùng</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("serifBold")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 font-serif font-bold"
+                        >
+                          𝐓𝐢𝐞̂𝐮 Đ𝐞̂̀ 𝐒𝐞𝐫𝐢𝐟 Đ𝐚̣̂𝐦
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("boldItalic")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 font-bold italic"
+                        >
+                          𝘽𝙤𝙡𝙙 𝙄𝙩𝙖𝙡𝙞𝙘 (Đậm Nghiêng)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("bubble")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100"
+                        >
+                          ⒽⓄⓉⓁⒾⓃⒺ (Chữ Bong Bóng)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("boxed")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100"
+                        >
+                          🄺🄷🅄🅈🄴🄽 🄼🄰🄸 (Chữ Ô Vuông)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("monospace")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 font-mono"
+                        >
+                          𝚖𝚊𝚢 𝚍𝚊𝚗𝚑 𝚌𝚑𝚞 (Monospace)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyFormatting("blackboard")}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 font-serif"
+                        >
+                          𝕋𝕚𝕖̂𝕦 Đ𝕖̂̀ ℝ𝕠̂̃𝕟𝕘 (Blackboard)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Symbols, Dividers, Clear Format */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  {/* Kí hiệu & Icon Popover Button */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSymbolsPopover(!showSymbolsPopover);
+                        setShowFontMenu(false);
+                        setShowDividersMenu(false);
+                      }}
+                      className="px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-bold text-[11px] shadow-2xs transition-colors flex items-center gap-1"
+                    >
+                      <Smile className="w-3 h-3 text-amber-600" />
+                      <span>Kí Hiệu & Icon</span>
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+
+                    {/* Symbols & Emojis Popover Panel */}
+                    {showSymbolsPopover && (
+                      <div className="absolute right-0 sm:right-auto sm:left-0 top-7 z-40 bg-white border border-slate-200 rounded-xl shadow-2xl p-2.5 w-72 sm:w-80 space-y-2 text-xs">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                          <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+                            <Sparkle className="w-3 h-3 text-amber-500" />
+                            Kí Hiệu & Emoji Facebook
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowSymbolsPopover(false)}
+                            className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        {/* Category tabs */}
+                        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-1 text-[10px]">
+                          {SYMBOL_CATEGORIES.map((cat, cIdx) => (
+                            <button
+                              key={cIdx}
+                              type="button"
+                              onClick={() => setActiveSymbolCategory(cIdx)}
+                              className={`px-2 py-1 rounded-md whitespace-nowrap font-medium transition-colors flex items-center gap-1 ${
+                                activeSymbolCategory === cIdx
+                                  ? "bg-blue-600 text-white font-bold shadow-2xs"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              <span>{cat.icon}</span>
+                              <span className="hidden xs:inline">{cat.title.split(" ")[0]}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Category title */}
+                        <div className="text-[10px] text-slate-500 font-semibold">
+                          {SYMBOL_CATEGORIES[activeSymbolCategory].title}:
+                        </div>
+
+                        {/* Symbol Grid */}
+                        <div className="grid grid-cols-5 sm:grid-cols-6 gap-1.5 p-1 bg-slate-50 rounded-lg max-h-40 overflow-y-auto">
+                          {SYMBOL_CATEGORIES[activeSymbolCategory].items.map((sym, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              onClick={() => handleInsertSymbol(sym)}
+                              className="h-8 rounded bg-white hover:bg-blue-50 hover:border-blue-400 border border-slate-200 flex items-center justify-center text-base hover:scale-110 transition-transform shadow-2xs"
+                              title={`Chèn ${sym}`}
+                            >
+                              {sym}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="text-[10px] text-slate-400 text-center pt-1 border-t border-slate-100">
+                          Bấm vào biểu tượng để chèn ngay vào vị trí con trỏ chuột
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Kẻ Phân Cách Divider Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDividersMenu(!showDividersMenu);
+                        setShowFontMenu(false);
+                        setShowSymbolsPopover(false);
+                      }}
+                      className="px-2 py-0.5 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-semibold text-[11px] shadow-2xs hover:text-blue-600 transition-colors flex items-center gap-1"
+                    >
+                      <Minus className="w-3 h-3 text-slate-500" />
+                      <span>Kẻ Dòng</span>
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+
+                    {showDividersMenu && (
+                      <div className="absolute right-0 top-7 z-40 bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 w-60 space-y-1 text-xs">
+                        <div className="text-[10px] font-bold text-slate-400 px-2 py-0.5 uppercase tracking-wider">
+                          Chèn Đường Phân Cách:
+                        </div>
+                        {POST_DIVIDERS.map((divItem, dIdx) => (
+                          <button
+                            key={dIdx}
+                            type="button"
+                            onClick={() => handleInsertDivider(divItem.value)}
+                            className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 flex flex-col"
+                          >
+                            <span className="font-mono text-[11px] text-slate-800 font-bold truncate">
+                              {divItem.value}
+                            </span>
+                            <span className="text-[9px] text-slate-400">{divItem.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Xóa Định Dạng */}
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFormatting("clear")}
+                    className="px-1.5 py-0.5 rounded bg-slate-50 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-900 text-[10px] font-semibold transition-colors"
+                    title="Xóa định dạng unicode, đưa về chữ thường mộc"
+                  >
+                    Xóa Kiểu
+                  </button>
+                </div>
+              </div>
+
+              {/* Textarea - Connected to Toolbar */}
               {activeSubTab === "spintax" ? (
                 <div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-semibold mb-1">
-                    <span>Nội dung bài viết (Spintax):</span>
-                    <span className="font-mono text-slate-400 font-normal">
-                      {spintaxContent.length} ký tự
-                    </span>
-                  </div>
                   <textarea
+                    ref={spintaxTextareaRef}
                     id="spintax-editor-textarea"
                     value={spintaxContent}
                     onChange={(e) => setSpintaxContent(e.target.value)}
-                    rows={6}
+                    rows={7}
                     placeholder="{Chào mọi người|Xin chào cả nhà}! {Hôm nay bên em|Shop em hiện đang}..."
-                    className="w-full bg-slate-50/60 hover:bg-white focus:bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed transition-colors"
+                    className="w-full bg-slate-50/60 hover:bg-white focus:bg-white border-x border-b border-t-0 border-slate-300 rounded-b-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed transition-colors"
                   ></textarea>
                 </div>
               ) : (
                 <div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-semibold mb-1">
-                    <span>Nội dung thô (văn bản thường):</span>
-                    <span className="font-mono text-slate-400 font-normal">
-                      {rawContent.length} ký tự
-                    </span>
-                  </div>
                   <textarea
+                    ref={rawTextareaRef}
                     id="raw-editor-textarea"
                     value={rawContent}
                     onChange={(e) => setRawContent(e.target.value)}
-                    rows={6}
-                    placeholder="Nhập bài viết bình thường tại đây rồi bấm 'Tạo Spintax Giữ Văn Phong'..."
-                    className="w-full bg-slate-50/60 hover:bg-white focus:bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed transition-colors"
+                    rows={7}
+                    placeholder="Nhập bài viết bình thường tại đây rồi dùng các nút định dạng phía trên hoặc bấm 'Tạo Spintax Giữ Văn Phong'..."
+                    className="w-full bg-slate-50/60 hover:bg-white focus:bg-white border-x border-b border-t-0 border-slate-300 rounded-b-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed transition-colors"
                   ></textarea>
                 </div>
               )}
@@ -620,18 +1116,59 @@ export const PostComposer: React.FC<PostComposerProps> = ({
 
             {/* Image Drop & Upload Zone + Thumbnails */}
             <div className="mt-2.5 space-y-2">
+              {/* Album Reorder Header when images exist */}
+              {images.length > 0 && (
+                <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-50/70 border border-amber-200/80 text-xs flex-wrap">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-amber-600 font-bold text-sm">👑</span>
+                    <div>
+                      <span className="font-bold text-amber-950 text-[11px] block leading-tight">
+                        Trang 1 là Ảnh Bìa Chính (Hiển thị to nhất trên Facebook Feed)
+                      </span>
+                      <span className="text-[10px] text-amber-800/80 block">
+                        Kéo thả trực tiếp ảnh hoặc bấm nút ◀ ▶ trên từng ảnh để đổi thứ tự trang
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    {images.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleReverseImages}
+                        className="px-2 py-1 rounded-md bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 text-[10px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                        title="Đảo ngược toàn bộ thứ tự trang/ảnh"
+                      >
+                        <RotateCcw className="w-3 h-3 text-amber-700" />
+                        <span>Đảo Ngược</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowReorderModal(true)}
+                      className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold flex items-center gap-1 transition-colors shadow-2xs"
+                      title="Mở bảng sắp xếp chi tiết toàn bộ album"
+                    >
+                      <ArrowUpDown className="w-3.5 h-3.5" />
+                      <span>Sắp Xếp Album ({images.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
                 {/* Drag & Drop Upload Button Box */}
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex flex-col items-center justify-center h-20 sm:h-24 border-2 border-dashed border-blue-300 hover:border-blue-600 rounded-lg bg-blue-50/30 hover:bg-blue-50 cursor-pointer transition-all p-2 text-center group select-none"
+                  className="flex flex-col items-center justify-center h-24 sm:h-28 border-2 border-dashed border-blue-300 hover:border-blue-600 rounded-xl bg-blue-50/30 hover:bg-blue-50 cursor-pointer transition-all p-2 text-center group select-none shadow-2xs"
                 >
                   <Upload className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform mb-1" />
                   <span className="text-[11px] text-blue-900 font-bold leading-tight">
                     Kéo ảnh vào đây
                   </span>
-                  <span className="text-[9px] text-slate-500 mt-0.5">hoặc bấm để chọn</span>
-                  <span className="text-[8px] text-blue-600 font-semibold mt-0.5 bg-blue-100/80 px-1 rounded">
+                  <span className="text-[9px] text-slate-500 mt-0.5">hoặc bấm chọn</span>
+                  <span className="text-[8px] text-blue-600 font-semibold mt-1 bg-blue-100/80 px-1 rounded">
                     Paste (Ctrl+V)
                   </span>
                   <input
@@ -644,52 +1181,154 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                   />
                 </div>
 
-                {/* Uploaded Image Thumbnails with Ratio & Delete */}
+                {/* Uploaded Image Thumbnails with Drag & Drop, Reorder Arrows & Page Badges */}
                 {images.map((img, idx) => (
                   <div
                     key={idx}
-                    className="relative group h-20 sm:h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", idx.toString());
+                      setDraggedImageIndex(idx);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverImageIndex(idx);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverImageIndex === idx) setDragOverImageIndex(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedImageIndex !== null) {
+                        handleMoveImage(draggedImageIndex, idx);
+                        setDraggedImageIndex(null);
+                        setDragOverImageIndex(null);
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDraggedImageIndex(null);
+                      setDragOverImageIndex(null);
+                    }}
+                    className={`relative group h-24 sm:h-28 rounded-xl overflow-hidden border transition-all duration-200 cursor-grab active:cursor-grabbing select-none ${
+                      idx === 0
+                        ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50/30"
+                        : "border-slate-200 bg-slate-100"
+                    } ${
+                      dragOverImageIndex === idx
+                        ? "scale-105 ring-2 ring-blue-500 border-blue-500 shadow-md"
+                        : "shadow-2xs"
+                    }`}
                   >
                     <img
                       src={img}
-                      alt={`Ảnh ${idx + 1}`}
+                      alt={`Trang ${idx + 1}`}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[9px] font-bold text-white bg-black/40 px-1 py-0.2 rounded">
-                          #{idx + 1}
+
+                    {/* Page Badges - Always Visible */}
+                    <div className="absolute top-1 left-1 z-10 flex items-center gap-1">
+                      {idx === 0 ? (
+                        <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[9px] shadow-sm flex items-center gap-0.5">
+                          <span>👑</span>
+                          <span>Bìa (Trang 1)</span>
                         </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900/80 text-white font-bold text-[9px] shadow-sm">
+                          Trang {idx + 1}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bottom Right Dimension Badge */}
+                    <span className="absolute bottom-1 right-1 z-10 px-1 py-0.2 rounded bg-black/60 text-[8px] font-medium text-white">
+                      {targetRatio}
+                    </span>
+
+                    {/* Hover Overlay with Reorder Arrows, Set as Cover, Preview & Delete */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/40 to-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5 z-20">
+                      {/* Top Action Row */}
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-white drop-shadow">
+                          {idx === 0 ? "Ảnh bìa" : `#${idx + 1}`}
+                        </span>
+
+                        <div className="flex items-center gap-1">
+                          {idx !== 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSetAsCover(idx);
+                              }}
+                              className="p-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs"
+                              title="Đặt ảnh này làm Trang 1 (Ảnh bìa chính)"
+                            >
+                              <Star className="w-2.5 h-2.5 fill-current" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveImage(idx);
+                            }}
+                            className="p-1 rounded bg-red-600 hover:bg-red-700 text-white shadow-xs"
+                            title="Xóa ảnh này"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Middle Reorder Arrows Bar */}
+                      <div className="flex items-center justify-center gap-1.5 my-auto">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleRemoveImage(idx);
+                            handleMoveImage(idx, idx - 1);
                           }}
-                          className="p-1 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xs"
-                          title="Xóa ảnh này"
+                          disabled={idx === 0}
+                          className="p-1 rounded-md bg-white/90 hover:bg-white text-slate-800 disabled:opacity-30 disabled:pointer-events-none shadow-xs"
+                          title="Di chuyển sang trước (Trang trước)"
                         >
-                          <Trash2 className="w-2.5 h-2.5" />
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+
+                        <span className="text-[9px] text-white font-bold px-1 py-0.5 rounded bg-white/20">
+                          {idx + 1}/{images.length}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMoveImage(idx, idx + 1);
+                          }}
+                          disabled={idx === images.length - 1}
+                          className="p-1 rounded-md bg-white/90 hover:bg-white text-slate-800 disabled:opacity-30 disabled:pointer-events-none shadow-xs"
+                          title="Di chuyển sang sau (Trang kế)"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
+                      {/* Bottom Preview Link */}
                       <div className="flex items-center justify-between text-[9px] text-white">
                         <button
                           type="button"
-                          onClick={() => setSelectedPreviewImage(img)}
-                          className="hover:underline flex items-center gap-0.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPreviewImage(img);
+                          }}
+                          className="hover:underline flex items-center gap-0.5 text-slate-200 hover:text-white"
                         >
                           <Eye className="w-2.5 h-2.5" />
-                          <span>Xem</span>
+                          <span>Phóng to</span>
                         </button>
-                        <span className="text-emerald-300 font-bold">{targetRatio}</span>
+                        <span className="text-amber-300 font-bold text-[8px]">Kéo để xếp</span>
                       </div>
                     </div>
-
-                    {/* Always visible badge on bottom-left */}
-                    <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded bg-black/60 text-[8px] font-medium text-white group-hover:hidden">
-                      #{idx + 1} • {targetRatio}
-                    </span>
                   </div>
                 ))}
               </div>
@@ -1030,6 +1669,200 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                 className="px-3 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold"
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visual Album / Page Reorder Modal */}
+      {showReorderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold">
+                  <ArrowUpDown className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
+                    Sắp Xếp Thứ Tự Trang / Ảnh Album ({images.length} ảnh)
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Trang 1 là ảnh bìa chính hiển thị nổi bật nhất trên Facebook Feed
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowReorderModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-700 text-sm font-bold transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Notice */}
+            <div className="px-4 py-2 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between text-[11px] text-blue-900">
+              <span className="flex items-center gap-1.5">
+                <span>💡</span>
+                <span>Dùng nút mũi tên hoặc kéo thả từng ảnh để thay đổi thứ tự trang.</span>
+              </span>
+              {images.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleReverseImages}
+                  className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Đảo Ngược Toàn Bộ</span>
+                </button>
+              )}
+            </div>
+
+            {/* Reorderable Image List */}
+            <div className="p-3 sm:p-4 overflow-y-auto space-y-2 max-h-[55vh]">
+              {images.map((img, idx) => (
+                <div
+                  key={idx}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", idx.toString());
+                    setDraggedImageIndex(idx);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOverImageIndex(idx);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverImageIndex === idx) setDragOverImageIndex(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedImageIndex !== null) {
+                      handleMoveImage(draggedImageIndex, idx);
+                      setDraggedImageIndex(null);
+                      setDragOverImageIndex(null);
+                    }
+                  }}
+                  onDragEnd={() => {
+                    setDraggedImageIndex(null);
+                    setDragOverImageIndex(null);
+                  }}
+                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 transition-all cursor-grab active:cursor-grabbing ${
+                    idx === 0
+                      ? "bg-amber-50/60 border-amber-300 ring-2 ring-amber-100 shadow-xs"
+                      : "bg-white hover:bg-slate-50 border-slate-200 shadow-2xs"
+                  } ${
+                    dragOverImageIndex === idx
+                      ? "border-blue-500 ring-2 ring-blue-200 scale-[1.01]"
+                      : ""
+                  }`}
+                >
+                  {/* Left: Drag Handle, Number Badge, Thumbnail */}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="text-slate-400 hover:text-slate-700 cursor-grab p-1">
+                      <GripVertical className="w-4 h-4" />
+                    </div>
+
+                    {/* Page Position Badge */}
+                    <div className="flex-shrink-0">
+                      {idx === 0 ? (
+                        <span className="px-2 py-1 rounded-md bg-amber-500 text-slate-950 font-black text-[10px] shadow-2xs flex items-center gap-1 whitespace-nowrap">
+                          <span>👑</span>
+                          <span>Trang 1 (Bìa)</span>
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px] border border-slate-200 whitespace-nowrap">
+                          Trang {idx + 1}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Thumbnail Image */}
+                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 flex-shrink-0">
+                      <img
+                        src={img}
+                        alt={`Ảnh ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+
+                    {/* Label */}
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-800 truncate">
+                        {idx === 0 ? "Ảnh bìa hiển thị đầu tiên" : `Ảnh trang phụ thứ ${idx + 1}`}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Khung hình: {targetRatio}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Reorder Actions */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {idx !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetAsCover(idx)}
+                        className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                        title="Đưa ảnh này lên làm Trang 1 (Ảnh bìa)"
+                      >
+                        <Star className="w-3 h-3 text-amber-500 fill-current" />
+                        <span className="hidden sm:inline">Làm Bìa</span>
+                      </button>
+                    )}
+
+                    {/* Move Up */}
+                    <button
+                      type="button"
+                      onClick={() => handleMoveImage(idx, idx - 1)}
+                      disabled={idx === 0}
+                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                      title="Di chuyển lên trên"
+                    >
+                      <ChevronLeft className="w-4 h-4 rotate-90" />
+                    </button>
+
+                    {/* Move Down */}
+                    <button
+                      type="button"
+                      onClick={() => handleMoveImage(idx, idx + 1)}
+                      disabled={idx === images.length - 1}
+                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                      title="Di chuyển xuống dưới"
+                    >
+                      <ChevronRight className="w-4 h-4 rotate-90" />
+                    </button>
+
+                    {/* Delete */}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveImage(idx)}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                      title="Xóa ảnh này khỏi bài viết"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500">
+                Thay đổi được cập nhật trực tiếp vào bản xem trước Facebook
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setShowReorderModal(false)}
+                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors"
+              >
+                Xong & Lưu Thứ Tự
               </button>
             </div>
           </div>
