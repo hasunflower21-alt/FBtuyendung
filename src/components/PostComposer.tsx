@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
   RefreshCw,
@@ -10,8 +10,21 @@ import {
   Upload,
   Layers,
   Edit3,
+  Sliders,
+  Smartphone,
+  Monitor,
+  AlertTriangle,
+  Crop,
+  ShieldCheck,
+  Maximize2,
+  Zap,
 } from "lucide-react";
 import { resolveSpintax, calculateCombinations } from "../utils/spintax";
+import {
+  optimizeImage,
+  isImageVerticalOrTooTall,
+  ImageOptimizationOptions,
+} from "../utils/imageOptimizer";
 
 interface PostComposerProps {
   rawContent: string;
@@ -40,7 +53,62 @@ export const PostComposer: React.FC<PostComposerProps> = ({
   const [showVariationsModal, setShowVariationsModal] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
 
+  // Drag & drop state
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounterRef = useRef(0);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Image Processing & Facebook Engagement Optimization State
+  const [targetRatio, setTargetRatio] = useState<"4:3" | "1:1" | "16:9" | "original">("4:3");
+  const [fitMode, setFitMode] = useState<"cover" | "contain">("cover");
+  const [autoOptimize, setAutoOptimize] = useState(true);
+  const [isProcessingImages, setIsProcessingImages] = useState(false);
+  const [optimizationMessage, setOptimizationMessage] = useState<string | null>(null);
+  const [previewDevice, setPreviewDevice] = useState<"mobile" | "desktop">("mobile");
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<string | null>(null);
+
   const combinations = calculateCombinations(spintaxContent);
+
+  // Global window drag over prevent default to avoid accidental page reload if dropped outside
+  useEffect(() => {
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    const handleWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", handleWindowDragOver);
+    window.addEventListener("drop", handleWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", handleWindowDragOver);
+      window.removeEventListener("drop", handleWindowDrop);
+    };
+  }, []);
+
+  // Support Clipboard Paste (Ctrl+V) for images
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          const file = items[i].getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        await processAndAddFiles(imageFiles);
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [targetRatio, fitMode, autoOptimize]);
 
   // Generate 5 spin samples
   const handleGenerateVariations = () => {
@@ -89,27 +157,150 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     }
   };
 
-  // Add sample image
-  const handleAddSampleImage = (url: string) => {
-    if (!images.includes(url)) {
-      setImages((prev) => [...prev, url]);
+  // Process files (either from file input, drag-and-drop, or paste)
+  const processAndAddFiles = async (files: File[]) => {
+    if (!files || files.length === 0) return;
+    setIsProcessingImages(true);
+    setOptimizationMessage(null);
+
+    const newImageUrls: string[] = [];
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) continue;
+
+        if (autoOptimize) {
+          const result = await optimizeImage(file, {
+            targetRatio,
+            fitMode,
+            maxDimension: 1200,
+            quality: 0.88,
+          });
+          newImageUrls.push(result.dataUrl);
+        } else {
+          // Read as standard data URL without resizing
+          const reader = new FileReader();
+          const p = new Promise<string>((resolve) => {
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsDataURL(file);
+          });
+          const url = await p;
+          newImageUrls.push(url);
+        }
+      }
+
+      if (newImageUrls.length > 0) {
+        setImages((prev) => [...prev, ...newImageUrls]);
+        setOptimizationMessage(
+          autoOptimize
+            ? `✅ Đã tối ưu ${newImageUrls.length} ảnh theo tỷ lệ ${
+                targetRatio === "4:3" ? "4:3 (Chuẩn FB)" : targetRatio === "1:1" ? "1:1 (Vuông)" : targetRatio
+              }: Vừa vặn tầm mắt, không choán diện tích feed.`
+            : `✅ Đã thêm ${newImageUrls.length} ảnh.`
+        );
+        setTimeout(() => setOptimizationMessage(null), 5000);
+      }
+    } catch (err) {
+      console.error("Error processing images:", err);
+      alert("Có lỗi khi xử lý hình ảnh, vui lòng thử lại.");
+    } finally {
+      setIsProcessingImages(false);
     }
   };
 
-  // Handle local file upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // Re-optimize all existing images with current selected ratio
+  const handleOptimizeAllExistingImages = async () => {
+    if (images.length === 0) return;
+    setIsProcessingImages(true);
+    try {
+      const updatedImages: string[] = [];
+      for (const imgUrl of images) {
+        const result = await optimizeImage(imgUrl, {
+          targetRatio,
+          fitMode,
+          maxDimension: 1200,
+          quality: 0.88,
+        });
+        updatedImages.push(result.dataUrl);
+      }
+      setImages(updatedImages);
+      setOptimizationMessage(
+        `⚡ Đã quy chuẩn lại toàn bộ ${images.length} ảnh về tỷ lệ ${targetRatio} (${fitMode === "cover" ? "Cắt gọn" : "Vừa khung"}): Đảm bảo hiển thị trọn vẹn văn bản và thanh tương tác trên Facebook!`
+      );
+      setTimeout(() => setOptimizationMessage(null), 5000);
+    } catch (err) {
+      console.error("Error re-optimizing:", err);
+    } finally {
+      setIsProcessingImages(false);
+    }
+  };
 
-    Array.from(files).forEach((file: File) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setImages((prev) => [...prev, event.target!.result as string]);
+  // Add sample image with auto-optimization
+  const handleAddSampleImage = async (url: string) => {
+    if (!images.includes(url)) {
+      if (autoOptimize) {
+        try {
+          const result = await optimizeImage(url, { targetRatio, fitMode, maxDimension: 1200 });
+          setImages((prev) => [...prev, result.dataUrl]);
+        } catch {
+          setImages((prev) => [...prev, url]);
         }
-      };
-      reader.readAsDataURL(file);
-    });
+      } else {
+        setImages((prev) => [...prev, url]);
+      }
+    }
+  };
+
+  // Handle local file upload via input
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      processAndAddFiles(Array.from(files) as File[]);
+    }
+    // reset input so same file can be re-selected if needed
+    e.target.value = "";
+  };
+
+  // Drag & drop handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current === 0) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    dragCounterRef.current = 0;
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const fileList = Array.from(files) as File[];
+      const validFiles = fileList.filter((f) => f.type.startsWith("image/"));
+      if (validFiles.length > 0) {
+        await processAndAddFiles(validFiles);
+      } else {
+        alert("Vui lòng chỉ kéo thả tệp hình ảnh (JPG, PNG, WebP).");
+      }
+    }
   };
 
   const handleRemoveImage = (index: number) => {
@@ -300,55 +491,204 @@ export const PostComposer: React.FC<PostComposerProps> = ({
             </div>
           </div>
 
-          {/* Media / Image Attachments - Mobile Compact Grid */}
-          <div className="bg-white rounded-xl p-3 sm:p-4 border border-slate-200 shadow-2xs">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-1.5">
-                <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
-                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  Hình Ảnh Đính Kèm ({images.length})
-                </h3>
+          {/* Media / Image Attachments & Facebook Size Optimizer */}
+          <div
+            ref={dropzoneRef}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            className={`bg-white rounded-xl p-3 sm:p-4 border transition-all duration-200 shadow-2xs relative ${
+              isDraggingOver
+                ? "border-blue-500 ring-4 ring-blue-100 bg-blue-50/40"
+                : "border-slate-200"
+            }`}
+          >
+            {/* Drag Overlay visual cue */}
+            {isDraggingOver && (
+              <div className="absolute inset-0 z-30 bg-blue-600/90 text-white rounded-xl flex flex-col items-center justify-center backdrop-blur-xs p-4 animate-in fade-in duration-150">
+                <Upload className="w-10 h-10 mb-2 animate-bounce" />
+                <h4 className="text-sm font-bold">Thả ảnh vào đây để tải lên ngay!</h4>
+                <p className="text-xs text-blue-100 text-center mt-1">
+                  Hệ thống sẽ tự động tối ưu tỷ lệ {targetRatio} vừa vặn chuẩn Facebook Feed.
+                </p>
               </div>
-              <span className="text-[10px] text-slate-500">Đính kèm tự động khi đăng</span>
+            )}
+
+            {/* Media Header with Title and Optimization Toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2.5 border-b border-slate-100 gap-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                  <ImageIcon className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>Hình Ảnh Đính Kèm ({images.length})</span>
+                    <span className="text-[9px] font-normal px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Tối ưu tương tác FB
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-500">
+                    Kéo thả ảnh trực tiếp, dán (Ctrl+V) hoặc chọn file từ thiết bị
+                  </p>
+                </div>
+              </div>
+
+              {/* Aspect Ratio Selector for Facebook Anti-Loss Engagement */}
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-semibold self-start sm:self-auto flex-wrap">
+                <span className="text-slate-400 px-1">Tỷ lệ:</span>
+                <button
+                  type="button"
+                  onClick={() => setTargetRatio("4:3")}
+                  className={`px-1.5 py-0.5 rounded transition-all ${
+                    targetRatio === "4:3"
+                      ? "bg-white text-blue-700 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="4:3 - Khuyên dùng trên Facebook: Chiều cao vừa vặn, không che mất chữ và nút Thích/Bình luận"
+                >
+                  4:3 (Chuẩn FB)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetRatio("1:1")}
+                  className={`px-1.5 py-0.5 rounded transition-all ${
+                    targetRatio === "1:1"
+                      ? "bg-white text-blue-700 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="1:1 - Vuông: Chuẩn bài bán hàng, sản phẩm gọn gàng"
+                >
+                  1:1 (Vuông)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetRatio("16:9")}
+                  className={`px-1.5 py-0.5 rounded transition-all ${
+                    targetRatio === "16:9"
+                      ? "bg-white text-blue-700 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="16:9 - Toàn cảnh: Rất gọn, dành cho báo giá hoặc công trình"
+                >
+                  16:9 (Gọn)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetRatio("original")}
+                  className={`px-1.5 py-0.5 rounded transition-all ${
+                    targetRatio === "original"
+                      ? "bg-white text-blue-700 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="Giữ tỷ lệ gốc"
+                >
+                  Gốc
+                </button>
+              </div>
             </div>
 
-            {/* Compact Image Grid (h-16 to h-20, dense & scannable) */}
+            {/* Engagement Optimization Callout Banner */}
+            <div className="mt-2.5 p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 flex-wrap text-[11px]">
+              <div className="flex items-center gap-1.5 text-slate-700 min-w-0">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                <span className="text-[10px] sm:text-[11px] leading-tight">
+                  <strong className="text-slate-900">Bảo vệ tương tác Facebook:</strong> Ảnh được nén tự động & căn tỷ lệ {targetRatio} giúp người lướt nhìn thấy trọn bài viết & nút bấm mà không bị ảnh quá dài choán màn hình.
+                </span>
+              </div>
+
+              {images.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleOptimizeAllExistingImages}
+                  disabled={isProcessingImages}
+                  className="px-2 py-0.5 rounded-md bg-white hover:bg-blue-50 border border-slate-300 hover:border-blue-400 text-blue-700 text-[10px] font-bold flex items-center gap-1 transition-all whitespace-nowrap shadow-2xs disabled:opacity-50"
+                  title="Áp dụng tỷ lệ đã chọn cho toàn bộ ảnh hiện có"
+                >
+                  <Zap className="w-3 h-3 text-amber-500" />
+                  <span>{isProcessingImages ? "Đang xử lý..." : "Cắt Gọn Toàn Bộ"}</span>
+                </button>
+              )}
+            </div>
+
+            {optimizationMessage && (
+              <div className="mt-2 text-[10px] sm:text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 p-2 rounded-lg flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 flex-shrink-0 text-emerald-600" />
+                <span className="font-medium">{optimizationMessage}</span>
+              </div>
+            )}
+
+            {/* Image Drop & Upload Zone + Thumbnails */}
             <div className="mt-2.5 space-y-2">
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                {/* Upload Button */}
-                <label className="flex flex-col items-center justify-center h-16 sm:h-20 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-lg bg-slate-50 hover:bg-blue-50/40 cursor-pointer transition-all p-1 text-center group">
-                  <Upload className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform mb-0.5" />
-                  <span className="text-[10px] text-slate-700 font-bold leading-tight">Thêm Ảnh</span>
-                  <span className="text-[9px] text-slate-400">JPG, PNG</span>
+              <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                {/* Drag & Drop Upload Button Box */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center h-20 sm:h-24 border-2 border-dashed border-blue-300 hover:border-blue-600 rounded-lg bg-blue-50/30 hover:bg-blue-50 cursor-pointer transition-all p-2 text-center group select-none"
+                >
+                  <Upload className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform mb-1" />
+                  <span className="text-[11px] text-blue-900 font-bold leading-tight">
+                    Kéo ảnh vào đây
+                  </span>
+                  <span className="text-[9px] text-slate-500 mt-0.5">hoặc bấm để chọn</span>
+                  <span className="text-[8px] text-blue-600 font-semibold mt-0.5 bg-blue-100/80 px-1 rounded">
+                    Paste (Ctrl+V)
+                  </span>
                   <input
+                    ref={fileInputRef}
                     type="file"
                     multiple
                     accept="image/*"
-                    onChange={handleFileUpload}
+                    onChange={handleFileInputChange}
                     className="hidden"
                   />
-                </label>
+                </div>
 
-                {/* Uploaded Image Thumbnails */}
+                {/* Uploaded Image Thumbnails with Ratio & Delete */}
                 {images.map((img, idx) => (
                   <div
                     key={idx}
-                    className="relative group h-16 sm:h-20 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
+                    className="relative group h-20 sm:h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
                   >
                     <img
                       src={img}
                       alt={`Ảnh ${idx + 1}`}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                     />
-                    <button
-                      onClick={() => handleRemoveImage(idx)}
-                      className="absolute top-1 right-1 p-1 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xs"
-                      title="Xóa ảnh này"
-                    >
-                      <Trash2 className="w-2.5 h-2.5" />
-                    </button>
-                    <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded bg-black/60 text-[9px] font-medium text-white">
-                      #{idx + 1}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[9px] font-bold text-white bg-black/40 px-1 py-0.2 rounded">
+                          #{idx + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveImage(idx);
+                          }}
+                          className="p-1 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xs"
+                          title="Xóa ảnh này"
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[9px] text-white">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPreviewImage(img)}
+                          className="hover:underline flex items-center gap-0.5"
+                        >
+                          <Eye className="w-2.5 h-2.5" />
+                          <span>Xem</span>
+                        </button>
+                        <span className="text-emerald-300 font-bold">{targetRatio}</span>
+                      </div>
+                    </div>
+
+                    {/* Always visible badge on bottom-left */}
+                    <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded bg-black/60 text-[8px] font-medium text-white group-hover:hidden">
+                      #{idx + 1} • {targetRatio}
                     </span>
                   </div>
                 ))}
@@ -356,7 +696,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
 
               {/* Sample Photo Chips */}
               <div className="pt-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-                <span className="text-[10px] text-slate-400 whitespace-nowrap">Ảnh mẫu:</span>
+                <span className="text-[10px] text-slate-400 whitespace-nowrap">Ảnh mẫu chuẩn:</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -364,9 +704,9 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                       "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&auto=format&fit=crop&q=60"
                     )
                   }
-                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0"
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0 flex items-center gap-1"
                 >
-                  + Cơ Điện
+                  <span>+ Cơ Điện (4:3)</span>
                 </button>
                 <button
                   type="button"
@@ -375,9 +715,9 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                       "https://images.unsplash.com/photo-1541888946425-d0fbb186156f?w=800&auto=format&fit=crop&q=60"
                     )
                   }
-                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0"
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0 flex items-center gap-1"
                 >
-                  + Công Trình
+                  <span>+ Công Trình (4:3)</span>
                 </button>
                 <button
                   type="button"
@@ -386,10 +726,19 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                       "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=60"
                     )
                   }
-                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0"
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium whitespace-nowrap flex-shrink-0 flex items-center gap-1"
                 >
-                  + Báo Giá
+                  <span>+ Báo Giá (16:9)</span>
                 </button>
+                {images.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setImages([])}
+                    className="text-[10px] px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 font-medium whitespace-nowrap flex-shrink-0 ml-auto"
+                  >
+                    Xóa hết ảnh ({images.length})
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -397,7 +746,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
           {/* Next Step Callout */}
           <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-white border border-slate-200 shadow-2xs gap-2">
             <span className="text-[11px] text-slate-600">
-              Đã sẵn sàng nội dung và ảnh đính kèm.
+              Đã sẵn sàng nội dung và ảnh đính kèm ({images.length} ảnh đã tối ưu).
             </span>
             <button
               onClick={onGoToNextTab}
@@ -409,30 +758,91 @@ export const PostComposer: React.FC<PostComposerProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Mobile-Ready Facebook Feed Preview (5 cols on desktop, toggleable on mobile) */}
+        {/* Right Column: Facebook Feed Preview with Mobile / Desktop Simulation (5 cols on desktop, toggleable on mobile) */}
         <div
           className={`lg:col-span-5 space-y-2.5 ${
             mobilePane === "editor" ? "hidden sm:block" : "block"
           }`}
         >
+          {/* Preview Header & View Mode Switcher */}
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1 whitespace-nowrap">
+            <div className="flex items-center gap-1.5">
               <Eye className="w-3.5 h-3.5 text-blue-600" />
-              <span>Mô Phỏng Facebook Feed</span>
-            </h3>
-            <button
-              onClick={() => {
-                setSpintaxContent((prev) => prev);
-              }}
-              className="text-[11px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 whitespace-nowrap"
-            >
-              <Shuffle className="w-3 h-3" />
-              <span>Đổi Biến Thể</span>
-            </button>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 whitespace-nowrap">
+                Mô Phỏng Facebook Feed
+              </h3>
+            </div>
+
+            {/* Mobile / Desktop Toggle & Shuffle Variation */}
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice("mobile")}
+                  className={`p-1 rounded flex items-center gap-1 ${
+                    previewDevice === "mobile"
+                      ? "bg-white text-blue-700 font-bold shadow-2xs"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                  title="Mô phỏng kích thước trên ứng dụng Facebook điện thoại"
+                >
+                  <Smartphone className="w-3 h-3" />
+                  <span className="hidden xs:inline">Mobile</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice("desktop")}
+                  className={`p-1 rounded flex items-center gap-1 ${
+                    previewDevice === "desktop"
+                      ? "bg-white text-blue-700 font-bold shadow-2xs"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                  title="Mô phỏng kích thước trên Facebook máy tính"
+                >
+                  <Monitor className="w-3 h-3" />
+                  <span className="hidden xs:inline">Desktop</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setSpintaxContent((prev) => prev);
+                }}
+                className="text-[10px] sm:text-[11px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 whitespace-nowrap bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200"
+                title="Đổi mẫu câu ngẫu nhiên"
+              >
+                <Shuffle className="w-3 h-3" />
+                <span>Đổi Mẫu</span>
+              </button>
+            </div>
           </div>
 
-          {/* Facebook Mock Post Card - Scaled for Mobile Clarity */}
-          <div className="bg-white text-slate-900 rounded-xl border border-slate-200 shadow-xs overflow-hidden font-sans">
+          {/* Facebook Mock Post Card - Compact, Balanced, Does Not Swamp Screen */}
+          <div
+            className={`bg-white text-slate-900 rounded-xl border border-slate-200 shadow-sm overflow-hidden font-sans transition-all duration-200 mx-auto ${
+              previewDevice === "mobile" ? "max-w-[400px]" : "w-full"
+            }`}
+          >
+            {/* Simulation Platform Indicator Bar */}
+            <div className="bg-slate-100 px-3 py-1 border-b border-slate-200 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+              <span className="flex items-center gap-1">
+                {previewDevice === "mobile" ? (
+                  <>
+                    <Smartphone className="w-3 h-3 text-slate-600" />
+                    <span>Facebook Mobile Feed (Tối ưu vuốt chạm)</span>
+                  </>
+                ) : (
+                  <>
+                    <Monitor className="w-3 h-3 text-slate-600" />
+                    <span>Facebook Desktop Feed</span>
+                  </>
+                )}
+              </span>
+              <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                <span>✓ Vừa vặn tầm nhìn</span>
+              </span>
+            </div>
+
             {/* Post Header */}
             <div className="p-2.5 sm:p-3 flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
@@ -463,56 +873,168 @@ export const PostComposer: React.FC<PostComposerProps> = ({
               </div>
             </div>
 
-            {/* Post Content */}
-            <div className="px-2.5 pb-2.5 sm:px-3 sm:pb-3 text-xs leading-relaxed whitespace-pre-line text-slate-800">
+            {/* Post Content Text */}
+            <div className="px-2.5 pb-2.5 sm:px-3 sm:pb-3 text-xs leading-relaxed whitespace-pre-line text-slate-800 break-words">
               {currentPreviewSample || "Nội dung bài viết sẽ hiển thị tại đây khi bạn nhập vào ô soạn thảo..."}
             </div>
 
-            {/* Image Preview - Compact Grid */}
+            {/* Image Preview - Balanced & Compact Grid that Never Dominates the Entire Screen */}
             {images.length > 0 && (
-              <div
-                className={`grid gap-0.5 bg-slate-100 border-t border-b border-slate-200 ${
-                  images.length === 1
-                    ? "grid-cols-1"
-                    : images.length === 2
-                    ? "grid-cols-2"
-                    : "grid-cols-2"
-                }`}
-              >
-                {images.slice(0, 4).map((img, idx) => (
-                  <div key={idx} className="relative aspect-video sm:aspect-square overflow-hidden bg-slate-200">
+              <div className="relative bg-slate-900 overflow-hidden border-t border-b border-slate-200">
+                {/* 1 Image: Balanced ratio container */}
+                {images.length === 1 && (
+                  <div
+                    className={`w-full overflow-hidden bg-slate-950 flex items-center justify-center ${
+                      targetRatio === "16:9"
+                        ? "aspect-video max-h-56"
+                        : targetRatio === "1:1"
+                        ? "aspect-square max-h-64 sm:max-h-72"
+                        : "aspect-[4/3] max-h-64 sm:max-h-72"
+                    }`}
+                  >
                     <img
-                      src={img}
-                      alt={`Preview ${idx + 1}`}
-                      className="w-full h-full object-cover"
+                      src={images[0]}
+                      alt="Preview post 1"
+                      className="w-full h-full object-cover object-center"
                     />
-                    {idx === 3 && images.length > 4 && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-sm">
-                        +{images.length - 3}
-                      </div>
-                    )}
                   </div>
-                ))}
+                )}
+
+                {/* 2 Images: 2 columns balanced 50/50 */}
+                {images.length === 2 && (
+                  <div className="grid grid-cols-2 gap-0.5 max-h-60 sm:max-h-64 aspect-[16/10] overflow-hidden bg-slate-900">
+                    {images.map((img, idx) => (
+                      <div key={idx} className="relative h-full overflow-hidden bg-slate-800">
+                        <img
+                          src={img}
+                          alt={`Preview ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 3 Images: 1 large on left, 2 stacked on right */}
+                {images.length === 3 && (
+                  <div className="grid grid-cols-3 gap-0.5 max-h-60 sm:max-h-64 aspect-[16/10] overflow-hidden bg-slate-900">
+                    <div className="col-span-2 relative h-full overflow-hidden bg-slate-800">
+                      <img
+                        src={images[0]}
+                        alt="Preview primary"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="col-span-1 grid grid-rows-2 gap-0.5 h-full">
+                      <div className="relative overflow-hidden bg-slate-800">
+                        <img
+                          src={images[1]}
+                          alt="Preview secondary 1"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="relative overflow-hidden bg-slate-800">
+                        <img
+                          src={images[2]}
+                          alt="Preview secondary 2"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4+ Images: Facebook classic multi-grid layout */}
+                {images.length >= 4 && (
+                  <div className="grid grid-cols-2 gap-0.5 max-h-64 sm:max-h-72 aspect-square overflow-hidden bg-slate-900">
+                    {images.slice(0, 4).map((img, idx) => (
+                      <div key={idx} className="relative aspect-square overflow-hidden bg-slate-800">
+                        <img
+                          src={img}
+                          alt={`Preview ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {idx === 3 && images.length > 4 && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-black text-lg">
+                            +{images.length - 3}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Dimension Tag Overlay */}
+                <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-2xs text-[9px] text-white font-medium flex items-center gap-1 shadow-xs">
+                  <span>Khung {targetRatio}</span>
+                  <span className="text-emerald-400 font-bold">• Vừa vặn</span>
+                </div>
               </div>
             )}
 
             {/* Post Stats & Reactions */}
             <div className="px-2.5 py-1.5 flex items-center justify-between text-[10px] text-slate-500 border-b border-slate-100">
               <span className="flex items-center gap-1">
-                <span>👍❤️</span> <span>24 lượt tương tác</span>
+                <span className="flex -space-x-1">
+                  <span className="inline-block w-3.5 h-3.5 rounded-full bg-blue-500 text-[9px] text-white text-center leading-3.5">👍</span>
+                  <span className="inline-block w-3.5 h-3.5 rounded-full bg-red-500 text-[9px] text-white text-center leading-3.5">❤️</span>
+                </span>
+                <span className="font-semibold text-slate-700 ml-0.5">38 tương tác</span>
               </span>
-              <span>3 bình luận • 1 chia sẻ</span>
+              <span>7 bình luận • 2 chia sẻ</span>
             </div>
 
-            {/* Like, Comment, Share Action Buttons */}
-            <div className="grid grid-cols-3 text-center py-1.5 text-[11px] font-semibold text-slate-600">
-              <button className="hover:bg-slate-50 py-1 rounded">Thích</button>
-              <button className="hover:bg-slate-50 py-1 rounded">Bình luận</button>
-              <button className="hover:bg-slate-50 py-1 rounded">Chia sẻ</button>
+            {/* Like, Comment, Share Action Buttons (Always clearly visible in viewport) */}
+            <div className="grid grid-cols-3 text-center py-1 text-[11px] font-semibold text-slate-600 divide-x divide-slate-100">
+              <button className="hover:bg-slate-50 py-1.5 rounded flex items-center justify-center gap-1">
+                <span>👍</span> <span>Thích</span>
+              </button>
+              <button className="hover:bg-slate-50 py-1.5 rounded flex items-center justify-center gap-1">
+                <span>💬</span> <span>Bình luận</span>
+              </button>
+              <button className="hover:bg-slate-50 py-1.5 rounded flex items-center justify-center gap-1">
+                <span>↗️</span> <span>Chia sẻ</span>
+              </button>
             </div>
+          </div>
+
+          {/* Engagement Guarantee Note */}
+          <div className="p-2.5 rounded-xl bg-blue-50/60 border border-blue-200 text-[10px] sm:text-[11px] text-slate-600 leading-relaxed">
+            <div className="font-bold text-blue-900 flex items-center gap-1 mb-0.5">
+              <Check className="w-3.5 h-3.5 text-blue-600" />
+              <span>Tại sao cần chuẩn hóa ảnh trên Facebook?</span>
+            </div>
+            <p>
+              Nếu ảnh quá dài (ảnh dọc 9:16), ảnh sẽ che kín toàn bộ màn hình điện thoại khiến người xem lướt qua mà không thấy nội dung hay thông tin liên hệ. Định dạng <strong>4:3 hoặc 1:1</strong> giữ trọn văn bản và nút <strong>Bình luận/Inbox</strong> ngay trước mắt, tăng mạnh tỷ lệ chuyển đổi.
+            </p>
           </div>
         </div>
       </div>
+
+      {/* Lightbox / Full-size Modal */}
+      {selectedPreviewImage && (
+        <div
+          onClick={() => setSelectedPreviewImage(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
+        >
+          <div className="relative max-w-2xl max-h-[90vh] p-2 bg-white rounded-xl overflow-hidden shadow-2xl">
+            <img
+              src={selectedPreviewImage}
+              alt="Full preview"
+              className="w-full h-auto max-h-[80vh] object-contain rounded-lg"
+            />
+            <div className="p-2 flex justify-between items-center text-xs">
+              <span className="text-slate-600 font-medium">Ảnh đã tối ưu định dạng</span>
+              <button
+                onClick={() => setSelectedPreviewImage(null)}
+                className="px-3 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Variations Modal */}
       {showVariationsModal && (
@@ -558,3 +1080,4 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     </div>
   );
 };
+
